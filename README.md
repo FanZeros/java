@@ -11,13 +11,13 @@
 
 #### 原图
 
-![yileina](.\save\yileina.jpg)
+![yileina](./save/yileina.jpg)
 
 #### 一键处理后的效果图
 
 风格简化：
 
-![yileina](.\save\data\0.jpg)
+![yileina](./save/data/0.jpg)
 
 ## 关于
 
