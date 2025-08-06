@@ -1,0 +1,1337 @@
+import javax.imageio.ImageIO;
+import javax.swing.*;
+import javax.swing.Timer;
+import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+
+/**
+ * 图像处理工具 - 二次元魔法变天
+ * 作者: 零殇_Fan
+ * <p>
+ * 功能介绍:
+ * 1. 选择图片特定部分的区块，用颜色或者贴图替换
+ * - 支持颜色替换和贴图替换（贴图需要jpg格式）
+ * - 计算方式1: 选完参数后直接点击图片上想要更改的地方就能替换
+ * - 计算方式2: 点击预览或者生成键自动替换
+ * 2. 消除了部分bug，增加只描绘黑线的选项
+ * 3. 图片自适应显示
+ * <p>
+ * 更新历史:
+ * 2021/2/12:
+ * - 描绘两次的功能
+ * - 功能可以在界面上直接调整
+ * - 描线防锯齿
+ * - 增加参数，使生成更多样化
+ * <p>
+ * 2021/2/2:
+ * - 图片现在支持jpg格式
+ * - 参数调试板块还未完成，请先自行调下方的参数
+ * <p>
+ * 2020/12/10:
+ * - 初始版本
+ */
+
+public class color2 extends JFrame {
+
+    static double percentIMG = 1;
+    // 第一页参数设置区域
+    int absBlack = 27, //黑边缘
+            deltaColor = 15;//色    小的更精密
+    int removeBlackPixel = 100;//移除少于此数量的单独的黑点
+    int removeBlackPixel2 = 60;//移除黑色块的强度
+
+    int notProcessColorIfNumLessThan = 5;//移除少于此数量的单独的色块
+
+    double speed = 60;//描绘速度
+    boolean paintNotPause = false;//上色不暂停
+    boolean colorful = false;//自行随机涂颜色
+    boolean black = true;//画黑线
+    boolean blackTwice = true;//画两次黑线
+
+    boolean removeBlackLast = true;
+    boolean removeForNormal = false;//true用自带颜色替换、false用左边颜色替换 (替换小色块、 黑色块（如果上面是true）)
+
+    private JComboBox<String> jRemove = new JComboBox<String>(new String[]{"不消除黑边", "自带颜色替换", "左边颜色替换"});
+    private JComboBox<String> jColorful = new JComboBox<String>(new String[]{"普通模式【不处理】", "魔幻色泽", "只勾黑边不上色"});
+    private JComboBox<String> jBlackTwice = new JComboBox<String>(new String[]{"不勾黑边", "勾一次黑边", "勾两次黑边"});
+
+    private JComboBox<String> jQuick = new JComboBox<String>(new String[]{"自行输入参数", "功能1：标准仅去近似色", "功能2：标准去字幕", "功能3：。。。"});
+
+
+    JSlider jSpeed = new JSlider();
+    JLabel jSpeedText2 = new JLabel("x99");
+
+    private JComboBox<String> jParallaxesChooser = new JComboBox<String>(new String[]{"替换", "叠加", "消除【黑底】", "曝光【白底】", "透明【仅png有效】"});
+    // 其他参数和组件定义
+
+    static long time = 0;
+    boolean process = false;
+    boolean timeFlag = false;
+    int cntColor;
+
+    private JPanel panel = null;
+    private JPanel panel1 = null;
+    private BufferedImage img = null;
+    private BufferedImage img1 = null;
+    private BufferedImage imgMap = null;
+
+    JTextArea jDelta = new JTextArea();
+    JTextArea jAbs = new JTextArea();
+    JTextArea jRemoveBlackPixel = new JTextArea();
+    JTextArea jRemoveBlackPixel2 = new JTextArea();
+    JTextArea jDontProcessColorIfNumLessThan = new JTextArea();
+
+
+
+    JButton Cal = new JButton("生成");
+    JButton load = new JButton("读取图片");
+    JButton change = new JButton("转换图片");
+    JButton change1 = new JButton("重新加载");
+    JButton saveButton = new JButton("保存【.png】");
+
+
+    private final JTabbedPane tabbedPane = new JTabbedPane();
+    String urlNow;
+
+    public color2() {
+        initComponent();
+        this.setVisible(true);
+        this.setBackground(new Color(0, 0, 100));
+        // 创建并启动绘图线程
+        Thread renderThread = new Thread(new Runner1());
+        renderThread.start();
+        setFocusable(true);
+        setupFrameCapture();
+    }
+
+
+    /**
+     *
+     */
+    void Quick() {
+        if (jQuick.getSelectedIndex() == 1) {
+            jDontProcessColorIfNumLessThan.setText("0");
+            jRemove.setSelectedIndex(1);
+        }
+        if (jQuick.getSelectedIndex() == 2) {
+            jDontProcessColorIfNumLessThan.setText("10");
+            jRemove.setSelectedIndex(2);
+        }
+    }
+
+
+    /**
+     * 触发执行图片处理操作
+     * 功能：
+     * 1. 设置处理标志(pro)为true，指示执行完整处理流程
+     * 2. 调用核心处理函数begin()启动图片处理任务
+     * <p>
+     * 应用场景：
+     * - 当用户点击"执行计算"按钮时调用
+     * - 与clickTry()预览功能相对，表示正式处理
+     * <p>
+     * 设计说明：
+     * - pro标志可能在begin()方法中用于区分完整处理与预览模式
+     * - 实际处理逻辑在begin()方法中实现（未展示）
+     */
+    private void click() {
+        // 设置处理标志为true（可能是"professional"或"production"的缩写）
+        // 调用核心处理函数开始图片处理
+        begin();  // begin()包含实际的图像处理算法
+    }
+
+    /**
+     * 初始化图像处理参数并启动处理流程
+     * 功能：
+     * 1. 从界面控件获取用户配置的处理参数
+     * 2. 设置图像处理的各种模式标志
+     * 3. 启动图像处理流程
+     * <p>
+     * 参数配置步骤：
+     * - 从文本框中获取数字参数值（黑边差值、色泽差值等）
+     * - 从下拉框选择项中获取处理模式标志（彩色模式、黑边处理模式等）
+     * <p>
+     * 注意：
+     * - 参数解析失败时静默忽略错误（使用默认值）
+     */
+    private void begin() {
+        // 第一步：从界面控件获取参数值
+        try {
+            deltaColor = Integer.parseInt(jDelta.getText());                    // 色泽差值参数
+            absBlack = Integer.parseInt(jAbs.getText());                        // 黑边差值参数
+            removeBlackPixel = Integer.parseInt(jRemoveBlackPixel.getText());     // 最小黑边像素数
+            removeBlackPixel2 = Integer.parseInt(jRemoveBlackPixel2.getText());   // 黑块移除强度
+            notProcessColorIfNumLessThan = Integer.parseInt(jDontProcessColorIfNumLessThan.getText()); // 色块像素阈值
+        } catch (Exception e) {
+            // 忽略参数转换异常（保留变量原有值或使用默认值）
+        }
+
+        // 第二步：设置色彩处理模式
+        if (jColorful.getSelectedIndex() == 0) {
+            colorful = false;  // 启用单色(灰度)模式
+        } else {
+            colorful = true;   // 启用彩色模式
+        }
+
+        // 第三步：设置描边处理模式
+        if (jRemove.getSelectedIndex() == 0) {
+            removeBlackLast = false;  // 完全不处理黑边描边
+        }
+        if (jRemove.getSelectedIndex() == 2) {
+            removeBlackLast = true;    // 最终处理黑边描边（非正常方式）
+            removeForNormal = false;    // 禁用正常描边移除逻辑
+        }
+        if (jRemove.getSelectedIndex() == 1) {
+            removeBlackLast = true;    // 最终处理黑边描边
+            removeForNormal = true;     // 启用正常描边移除逻辑
+        }
+
+        // 第四步：设置黑边二次处理模式
+        if (jBlackTwice.getSelectedIndex() == 0) {
+            black = false;  // 禁用黑边处理
+        }
+        if (jBlackTwice.getSelectedIndex() == 1) {
+            black = true;         // 启用黑边处理
+            blackTwice = false;   // 禁用黑边二次处理
+        }
+        if (jBlackTwice.getSelectedIndex() == 2) {
+            black = true;        // 启用黑边处理
+            blackTwice = true;    // 启用黑边二次处理
+        }
+
+        // 第五步：设置处理标志，启动图像处理流程
+        process = true;  // 控制核心算法开始执行的标志位
+        timeFlag = true;
+    }
+
+
+    /**
+     * 加载图片文件方法
+     * 功能：
+     * 1. 打开文件选择对话框让用户选择图片
+     * 2. 支持PNG和JPG格式图片
+     * 3. 初始化并显示选中的图片
+     * 4. 尝试从文件名中解析图片序号（如"图片(1).jpg"）
+     * <p>
+     * 处理流程：
+     * - 设置默认打开路径为当前工作目录
+     * - 创建文件过滤器限制只能选择图片文件
+     * - 显示文件选择对话框
+     * - 处理用户选择的图片文件
+     */
+    private void Load() {
+        // 获取当前工作目录路径
+        String path = System.getProperty("user.dir");
+
+        // 创建文件选择器，初始路径设为当前工作目录
+        JFileChooser choose = new JFileChooser(path);
+        choose.setDialogTitle("请选择图片");  // 设置对话框标题
+
+        // 创建图片文件过滤器（支持PNG和JPG格式）
+        FileNameExtensionFilter filter = new FileNameExtensionFilter("图片", "png", "jpg");
+        choose.setFileFilter(filter);  // 应用文件过滤器
+        // 显示打开文件对话框
+        int returnVal = choose.showOpenDialog(null);
+        // 检查用户是否确认选择文件
+        if (returnVal == JFileChooser.APPROVE_OPTION) {
+            // 获取用户选择的文件路径
+            String filepath = choose.getSelectedFile().getPath();
+            // 保存当前文件路径到全局变量
+            urlNow = filepath;
+            System.out.println(urlNow);  // 打印文件路径（调试用）
+            // 初始化并显示图片
+            initImg();  // 此方法应在别处定义，用于加载和显示图片
+            // 刷新图片预览面板
+            panel1.repaint();
+        }
+    }
+
+    /**
+     * 初始化图形用户界面的各个组件方法，包含布局设置、组件创建与事件绑定
+     * 功能说明：
+     * 1. 创建图片处理软件的主界面窗口
+     * 2. 设置两个主功能标签页："自动描线绘图"和"二次元魔幻变天"
+     * 3. 为每个功能面板添加详细的参数控制组件
+     * 4. 实现图片显示区域和功能按钮的布局
+     */
+    private void initComponent() {
+        // 设置主窗口标题（包含软件名称和使用协议声明）
+        this.setTitle("图片二创软件 by 零殇         [1.软件免费使用，严禁二次售卖  2.使用该软件制作多张图片并发布时，请附上该软件的发布地址【比如b站视频地址】，谢谢]");
+        // 设置关闭窗口时退出程序
+        this.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        // 设置主窗口尺寸为1640x1000像素
+        this.setSize(1640, 1000);
+        // 使用绝对布局（空布局）
+        setLayout(null);
+        // 创建"自动描线绘图"功能面板（第一个主标签页内容面板）
+        JPanel panel1st = new JPanel();
+        panel1st.setBounds(0, 0, 600, 700);  // 设置面板位置和尺寸
+        panel1st.setLayout(null);  // 使用绝对布局
+        // 添加功能标签页
+        tabbedPane.addTab("自动描线绘图", null, panel1st, "");  // 添加第一个功能标签页
+        tabbedPane.setBounds(1000, 200, 600, 700);  // 设置标签页容器在窗口中的位置
+        // ================= 自动描线绘图功能面板：参数控制组件 =================
+        // 色彩模式选择下拉框
+        jColorful.setBounds(400, 500, 150, 40);  // 位置和尺寸
+        jColorful.setSelectedIndex(0);  // 设置默认选项
+        panel1st.add(jColorful);  // 添加到面板
+        // 黑边处理模式选择下拉框
+        jBlackTwice.setBounds(400, 100, 120, 40);  // 位置和尺寸
+        jBlackTwice.setSelectedIndex(1);  // 设置默认选项
+        panel1st.add(jBlackTwice);  // 添加到面板
+        // 快速处理模式下拉框（带事件绑定）
+        jQuick.addActionListener((e -> Quick()));  // 绑定快速处理事件
+        jQuick.setBounds(200, 500, 150, 40);  // 位置和尺寸
+        jQuick.setSelectedIndex(0);  // 设置默认选项
+        panel1st.add(jQuick);  // 添加到面板
+        // 黑色描边处理模式选择下拉框
+        jRemove.setBounds(400, 400, 150, 40);  // 位置和尺寸
+        jRemove.setSelectedIndex(1);  // 设置默认选项
+        panel1st.add(jRemove);  // 添加到面板
+
+        // 黑色描边处理说明标签
+        JLabel jRemoveText = new JLabel("最后处理黑色描边的模式");
+        jRemoveText.setBounds(40, 400, 380, 50);  // 位置和尺寸
+        jRemoveText.setFont(new Font("", Font.BOLD, 25));  // 设置字体
+        panel1st.add(jRemoveText);  // 添加到面板
+
+        // 处理速度滑块（带事件绑定）
+        jSpeed.addChangeListener((e) -> speedChange());  // 绑定速度变化事件
+        jSpeed.setMaximum(75);  // 设置最大值
+        jSpeed.setMinimum(0);  // 设置最小值
+        jSpeed.setBounds(170, 30, 400, 40);  // 位置和尺寸
+        panel1st.add(jSpeed);  // 添加到面板
+
+        // 处理速度说明标签
+        JLabel jSpeedText = new JLabel("处理速度");
+        jSpeedText.setBounds(40, 25, 120, 50);  // 位置和尺寸
+        jSpeedText.setFont(new Font("", Font.BOLD, 25));  // 设置字体
+        panel1st.add(jSpeedText);  // 添加到面板
+
+        // 处理速度数值显示标签
+        jSpeedText2.setBounds(80, 0, 60, 50);  // 位置和尺寸
+        jSpeedText2.setFont(new Font("", Font.BOLD, 15));  // 设置字体
+        panel1st.add(jSpeedText2);  // 添加到面板
+
+
+        // ================= 图片显示区域设置 =================
+        // 结果图片显示面板（底部预览区）
+        panel1 = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g;
+                // 当有图片时，按比例居中显示图片
+                if (img1 != null) {
+                    // 计算适合面板的缩放比例
+                    double percent = Math.min(1.0 * this.getWidth() / img1.getWidth(),
+                            1.0 * this.getHeight() / img1.getHeight());
+                    // 绘制缩放后的图片（保持居中）
+                    g2.drawImage(img1,
+                            (int) (img1.getWidth() * (-percent / 2) + this.getWidth() / 2),
+                            (int) (img1.getHeight() * (-percent / 2) + this.getHeight() / 2),
+                            (int) (img1.getWidth() * (percent)),
+                            (int) (img1.getHeight() * (percent)), null);
+                }
+            }
+        };
+        panel1.setBounds(80, 580, 580, 320);  // 位置和尺寸
+        panel1.setBackground(new Color(224, 224, 255));  // 设置背景色
+        this.add(panel1);  // 添加到主窗口
+
+        // 主图片显示面板（中部主要区域）
+        panel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g;
+                // 当有图片时，按比例居中显示图片
+                if (img != null) {
+                    // 计算适合面板的缩放比例
+                    double percent = Math.min(1.0 * this.getWidth() / img.getWidth(),
+                            1.0 * this.getHeight() / img.getHeight());
+                    percentIMG = percent;  // 保存全局缩放比例
+                    // 绘制缩放后的图片（保持居中）
+                    g2.drawImage(img,
+                            (int) (img.getWidth() * (-percent / 2) + this.getWidth() / 2),
+                            (int) (img.getHeight() * (-percent / 2) + this.getHeight() / 2),
+                            (int) (img.getWidth() * (percent)),
+                            (int) (img.getHeight() * (percent)), null);
+                }
+            }
+        };
+        panel.setBounds(20, 20, 960, 540);  // 位置和尺寸
+        panel.setBackground(new Color(224, 255, 224));  // 设置背景色
+        this.add(panel);  // 添加到主窗口
+
+        // ================= 功能按钮区域设置 =================
+        // 加载图片按钮
+        load.setBounds(1100, 70, 120, 60);  // 位置和尺寸
+        load.setFont(new Font("", Font.BOLD, 20));  // 设置字体
+        load.addActionListener((e) -> Load());  // 绑定图片加载事件
+
+        // 图片转换按钮
+        change.setBounds(720, 580, 120, 50);  // 位置和尺寸
+        change.setFont(new Font("", Font.BOLD, 20));  // 设置字体
+        change.addActionListener((e) -> Change());  // 绑定图片转换事件1
+        this.add(change);  // 添加到主窗口
+
+        // 重新加载
+        change1.setBounds(860, 580, 120, 50);  // 位置和尺寸
+        change1.setFont(new Font("", Font.BOLD, 20));  // 设置字体
+        change1.addActionListener((e) -> reload());  // 绑定图片重新加载
+        this.add(change1);  // 添加到主窗口
+
+        // 保存图片按钮
+        saveButton.setBounds(720, 680, 130, 50);  // 位置和尺寸
+        saveButton.setFont(new Font("", Font.BOLD, 15));  // 设置字体
+        saveButton.addActionListener((e) -> savePic());  // 绑定图片保存事件
+        this.add(saveButton);  // 添加到主窗口
+
+        // 执行生成按钮
+        Cal.setBounds(1250, 70, 130, 60);  // 位置和尺寸
+        Cal.setFont(new Font("", Font.BOLD, 20));  // 设置字体
+        Cal.addActionListener((e) -> click());  // 绑定计算执行事件
+
+
+        // ================= 自动描线绘图功能面板：参数输入框设置 =================
+        // 黑边差值参数标签
+        jAbs.setText("25");  // 设置默认值
+        jAbs.setBounds(150, 100, 70, 40);  // 位置和尺寸
+        jAbs.setFont(new Font("", Font.BOLD, 25));  // 设置字体
+        jAbs.setForeground(Color.BLACK);  // 设置文字颜色
+        panel1st.add(jAbs);  // 添加到面板
+
+        // 黑边差值说明标签
+        JLabel jAbsText = new JLabel("黑边差值");
+        jAbsText.setBounds(40, 100, 90, 50);  // 位置和尺寸
+        jAbsText.setFont(new Font("", Font.BOLD, 20));  // 设置字体
+        panel1st.add(jAbsText);  // 添加到面板
+
+        // 色泽差值参数标签
+        jDelta.setText("7");  // 设置默认值
+        jDelta.setBounds(150, 160, 70, 40);  // 位置和尺寸
+        jDelta.setFont(new Font("", Font.BOLD, 25));  // 设置字体
+        jDelta.setForeground(Color.PINK);  // 设置文字颜色
+        panel1st.add(jDelta);  // 添加到面板
+
+        // 色泽差值说明标签
+        JLabel jDeltaText = new JLabel("色泽差值");
+        jDeltaText.setBounds(40, 160, 90, 50);  // 位置和尺寸
+        jDeltaText.setFont(new Font("", Font.BOLD, 20));  // 设置字体
+        panel1st.add(jDeltaText);  // 添加到面板
+
+        // 色块像素阈值参数标签
+        jDontProcessColorIfNumLessThan.setText("0");  // 设置默认值
+        jDontProcessColorIfNumLessThan.setBounds(250, 240, 70, 40);  // 位置和尺寸
+        jDontProcessColorIfNumLessThan.setFont(new Font("", Font.BOLD, 25));  // 设置字体
+        jDontProcessColorIfNumLessThan.setForeground(Color.red);  // 设置文字颜色
+        panel1st.add(jDontProcessColorIfNumLessThan);  // 添加到面板
+
+        // 色块像素阈值说明标签
+        JLabel jDontProcessColorIfNumLessThanText = new JLabel("不处理少于x像素的色块");
+        jDontProcessColorIfNumLessThanText.setBounds(40, 240, 210, 50);  // 位置和尺寸
+        jDontProcessColorIfNumLessThanText.setFont(new Font("", Font.BOLD, 17));  // 设置字体
+        panel1st.add(jDontProcessColorIfNumLessThanText);  // 添加到面板
+
+        // 最小黑边像素参数标签
+        jRemoveBlackPixel.setText("300");  // 设置默认值
+        jRemoveBlackPixel.setBounds(200, 320, 70, 40);  // 位置和尺寸
+        jRemoveBlackPixel.setFont(new Font("", Font.BOLD, 30));  // 设置字体
+        jRemoveBlackPixel.setForeground(Color.black);  // 设置文字颜色
+        panel1st.add(jRemoveBlackPixel);  // 添加到面板
+
+        // 最小黑边像素说明标签
+        JLabel jRemoveBlackPixelText = new JLabel("不画少于x像素的黑边");
+        jRemoveBlackPixelText.setBounds(10, 320, 210, 50);  // 位置和尺寸
+        jRemoveBlackPixelText.setFont(new Font("", Font.BOLD, 17));  // 设置字体
+        panel1st.add(jRemoveBlackPixelText);  // 添加到面板
+
+        // 黑块移除强度参数标签
+        jRemoveBlackPixel2.setText("60");  // 设置默认值
+        jRemoveBlackPixel2.setBounds(490, 320, 70, 40);  // 位置和尺寸
+        jRemoveBlackPixel2.setFont(new Font("", Font.BOLD, 30));  // 设置字体
+        jRemoveBlackPixel2.setForeground(Color.black);  // 设置文字颜色
+        panel1st.add(jRemoveBlackPixel2);  // 添加到面板
+
+        // 黑块移除强度说明标签
+        JLabel jRemoveBlackPixelText2 = new JLabel("移除大个黑色块的强度");
+        jRemoveBlackPixelText2.setBounds(320, 320, 160, 50);  // 位置和尺寸
+        jRemoveBlackPixelText2.setFont(new Font("", Font.BOLD, 15));  // 设置字体
+        panel1st.add(jRemoveBlackPixelText2);  // 添加到面板
+
+        // ================= 添加主要组件容器到主窗口 =================
+        this.add(tabbedPane);  // 添加主标签页容器
+        this.add(Cal);  // 添加执行计算按钮
+        this.add(load);  // 添加加载图片按钮
+    }
+
+    /**
+     * 处理速度滑块变化事件
+     * 功能：
+     * 1. 根据滑块当前值计算实际处理速度
+     * 2. 更新速度显示标签文本
+     * 3. 当计算速度超过阈值时显示"Max"标识
+     * <p>
+     * 速度计算公式：指数增长模式，基础系数0.1，以1.1为底数，滑块值作为指数
+     */
+    private void speedChange() {
+        // 计算实际速度值：0.1 × 1.1^(滑块当前值)
+        speed = 0.1 * Math.pow(1.1, jSpeed.getValue());
+
+        // 更新速度显示标签：显示速度的10倍整数值（格式："x[整数]"）
+        jSpeedText2.setText("x" + (int) (speed * 10));
+
+        // 当计算速度超过100时，显示"Max"标识
+        if (speed > 100) {
+            jSpeedText2.setText("Max");  // 显示最大值标识
+        }
+    }
+
+    /**
+     * 交换显示图片
+     * 功能：
+     * 1. 交换主显示区(img)与预览区(img1)的图片内容
+     * 2. 刷新两个显示区域以展示交换后的图片
+     * <p>
+     * 应用场景：
+     * - 当用户需要比较原始图片与处理后图片的效果
+     * - 方便进行"前后对比"操作
+     * <p>
+     * 实现原理：
+     * 通过创建临时图像变量实现两幅图像的快速交换
+     */
+    private void Change() {
+        // 创建临时缓冲图像，保存预览区当前图像
+        BufferedImage img3 = img1;  // img3临时存储预览图像
+
+        // 交换两幅图像：
+        img1 = img;   // 将主显示图像赋给预览区
+        img = img3;   // 将原预览图像赋给主显示区
+
+        // 刷新两个面板以显示交换后的图片
+        panel.repaint();   // 刷新主显示区
+        panel1.repaint();  // 刷新预览区
+    }
+
+    /**
+     * 重置图片为原始状态
+     * 功能：
+     * 1. 从当前选定的文件路径重新加载原始图片
+     * 2. 同时更新主显示区(img)和预览区(img1)的图片内容
+     * 3. 刷新两个显示区域以展示重新加载的图片
+     * <p>
+     * 应用场景：
+     * - 当用户需要放弃所有修改，恢复到最初加载的原始图片状态
+     * - 用于重置图片查看器或重新开始编辑流程
+     * <p>
+     * 错误处理：
+     * - 图片加载失败时会忽略异常，不做任何特殊处理
+     */
+    private void reload() {
+        // 从当前文件路径创建文件对象
+        File file = new File(urlNow);
+
+        try {
+            // 从文件系统重新加载原始图片
+            img = ImageIO.read(file);   // 重置主显示区的图片为原始图片
+            img1 = ImageIO.read(file);  // 重置预览区的图片为原始图片
+        } catch (IOException ignored) {
+            // 图片加载失败时忽略异常（可能文件不存在或格式不支持）
+        }
+
+        // 刷新显示面板以展示重新加载的图片
+        panel.repaint();   // 刷新主显示区
+        panel1.repaint();  // 刷新预览区
+    }
+
+
+    static boolean stop = false;
+
+    /**
+     * 初始化并加载图片
+     * 功能：
+     * 1. 从当前选定的文件路径加载图片
+     * 2. 将图片同时赋给主显示图像(img)和预览图像(img1)
+     * 3. 更新两个显示面板（主显示区和预览区）
+     * <p>
+     * 错误处理：
+     * - 当图片加载失败时设置停止标志(stop = true)
+     */
+    private void initImg() {
+        // 从当前文件路径创建文件对象
+        File file = new File(urlNow);
+        try {
+            // 使用ImageIO读取图片文件
+            img = ImageIO.read(file);  // 加载到主显示图像变量
+            img1 = ImageIO.read(file); // 同时加载到预览图像变量
+            // 刷新两个显示面板以显示新图片
+            panel1.repaint();  // 刷新底部预览面板
+            panel.repaint();   // 刷新主显示面板
+        } catch (IOException e) {
+            // 图片加载失败时设置停止标志
+            stop = true;  // 防止后续处理操作执行
+        }
+    }
+
+
+    private void savePic() {
+        // 使用标准格式化器生成时间戳字符串
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+        String timestamp = LocalDateTime.now().format(formatter);
+        try {
+            // 构建标准化路径（兼容不同操作系统）
+            Path saveDir = Paths.get(System.getProperty("user.dir"), "save");
+            // 创建目录及错误处理
+            if (!Files.exists(saveDir)) {
+                try {
+                    Files.createDirectories(saveDir);
+                } catch (IOException e) {
+                    JOptionPane.showMessageDialog(null,
+                            "保存失败：无法创建目录",
+                            "错误", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+            }
+            // 构建完整输出路径
+            Path outputPath = saveDir.resolve(timestamp + ".png");
+            // 使用资源自动管理保存图片
+            try (FileOutputStream out = new FileOutputStream(outputPath.toFile())) {
+                ImageIO.write(img, "PNG", out);
+                JOptionPane.showMessageDialog(null,
+                        "图片已保存至：" + outputPath.toAbsolutePath(),
+                        "保存成功", JOptionPane.INFORMATION_MESSAGE);
+            }
+        } catch (IOException e) {
+            // 双重视觉提示（控制台+用户界面）
+            JOptionPane.showMessageDialog(null,
+                    "保存失败：" + e.getMessage(),
+                    "错误", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+        }
+    }
+
+
+    /**
+     * 处理图片
+     */
+    // 在初始化部分定义全局变量
+    private int frameCount = 0;
+    private Timer captureTimer;
+    private Robot robot; // 复用Robot对象
+    private static final String OUTPUT_DIR = "D:\\Test\\image"; // 替换为实际路径
+
+    private void setupFrameCapture() {
+        // 确保文件夹存在
+        new File(OUTPUT_DIR).mkdirs();
+        // 初始化Robot（只创建一次）
+        try {
+            robot = new Robot();
+        } catch (AWTException e) {
+            return;
+        }
+        // 设置定时器捕获每一帧（按60帧/秒）
+        captureTimer = new Timer(60, e -> {
+            if (timeFlag) {
+                // 获取面板位置和尺寸（确保在EDT中执行）
+                Point panelLocation = panel.getLocationOnScreen();
+                Rectangle rect = new Rectangle(panelLocation, panel.getSize());
+                try {
+                    // 捕获帧（使用复用的Robot）
+                    BufferedImage frame = robot.createScreenCapture(rect);
+                    // 异步保存图片，避免阻塞EDT
+                    new Thread(() -> {
+                        try {
+                            // 使用固定位数（如4位）的帧编号
+                            String fileName = String.format("frame_%04d.png", frameCount);
+                            File outputFile = new File(OUTPUT_DIR, fileName);
+                            ImageIO.write(frame, "png", outputFile);
+                            frameCount++;
+                        } catch (IOException ex) {
+                        }
+                    }).start();
+                } catch (Exception ex) {
+                }
+            }
+        });
+        captureTimer.start();
+    }
+
+
+    public static void main(String[] args) {
+        // 获取当前系统时间（默认时区）
+        LocalDateTime currentTime = LocalDateTime.now();
+
+        // 创建时间格式化器，定义时间戳格式为：年(4位)月(2位)日(2位)时(2位)分(2位)秒(2位)
+        // 使用标准格式器替代手动拼接，避免排序错乱问题[1,3](@ref)
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+
+        // 将当前时间格式化为字符串后转为长整型（生成14位时间戳）
+        time = Long.parseLong(currentTime.format(formatter));
+
+        // 获取项目根目录路径（替代字符串拼接，确保跨平台兼容性）[5](@ref)
+        Path basePath = Paths.get(System.getProperty("user.dir"));
+
+        try {
+            // 原子性创建多级目录（替代mkdir()的层级创建方式）
+            // 创建output目录（用于程序输出）[7](@ref)
+            Files.createDirectories(basePath.resolve("output"));
+
+            /*
+             * 创建嵌套目录save/data（用于持久化数据存储）
+             * 注意：createDirectories()会自动创建所有不存在的父目录
+             * 比独立创建save和save/data更高效[3,5](@ref)
+             */
+            Files.createDirectories(basePath.resolve("save/data"));
+
+        } catch (IOException e) {
+            // 将受检异常转换为非受检异常（保持代码简洁性）
+            // 添加异常上下文信息便于问题定位[7](@ref)
+            throw new RuntimeException("目录创建失败: " + basePath, e);
+        }
+        new color2();
+
+    }
+
+
+    /**
+     * 图像处理核心线程类
+     * 功能：在独立线程中执行图像处理任务，包括颜色选择、颜色替换、描边处理等
+     */
+    /**
+     * Runner1类实现了Runnable接口，用于处理图像处理的异步任务
+     * 包含颜色选择、颜色替换、边缘检测、区域着色等多种图像处理功能
+     */
+    class Runner1 implements Runnable {
+        int cnt = 0; // 通用计数器，用于控制处理速度
+
+        @Override
+        public void run() {
+            // 主循环，持续处理图像操作
+            while (true) {
+                try {
+                    Thread.sleep(20); // 每次循环休眠20ms，控制CPU使用率
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                // 主图像处理流程
+                if (process) {
+                    processImg(); // 处理单张图片
+                    stop = false;
+                    process = false;
+                    try {
+                        Thread.sleep(2000); // 每次循环休眠2000ms，完全下载
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+
+                    timeFlag = false;
+                }
+            }
+        }
+
+
+        /**
+         * 核心图像处理函数 - 执行图像描边、着色等处理
+         * 包含边缘检测、区域着色、小黑块移除、描边处理等多个步骤
+         */
+        private void processImg() {
+            // 检查图片是否加载
+            if (img == null) {
+                System.out.println("错误！无图片");
+                return;
+            }
+
+            // 三维数组存储图像处理数据 [width][height][属性]
+            // 索引说明：
+            // [0]: 状态标志 (0=边缘, 1=未处理, 2=已处理)
+            // [1]: 块分类标志
+            // [3]: 强边缘标志
+            // [9]: 原始颜色
+            // [10]: 存储原始颜色值
+            int data[][][] = new int[img.getWidth()][img.getHeight()][11];
+            // 初始化图像数据
+            for (int x = 0; x < img.getWidth(); x++) {
+                for (int y = 0; y < img.getHeight(); y++) {
+                    data[x][y][0] = 1;  // 标记为未处理
+                    data[x][y][10] = img.getRGB(x, y);  // 存储原始颜色
+
+                    // 清空当前像素（设为白色）
+                    Color color = new Color(255, 255, 255);
+                    img.setRGB(x, y, color.getRGB());
+
+                    panel.repaint();
+                }
+            }
+
+            // 边缘检测处理
+            for (int x = 1; x < img.getWidth() - 1; x++) {
+                for (int y = 1; y < img.getHeight() - 1; y++) {
+                    // 获取当前点及周围8个邻域点的颜色
+                    Color c = new Color(data[x][y][10]);
+                    Color cLeft = new Color(data[x - 1][y][10]);
+                    Color cRight = new Color(data[x + 1][y][10]);
+                    Color cTop = new Color(data[x][y - 1][10]);
+                    Color cBottom = new Color(data[x][y + 1][10]);
+                    Color cTopLeft = new Color(data[x - 1][y - 1][10]);
+                    Color cTopRight = new Color(data[x + 1][y - 1][10]);
+                    Color cBottomLeft = new Color(data[x - 1][y + 1][10]);
+                    Color cBottomRight = new Color(data[x + 1][y + 1][10]);
+
+                    // 计算RGB三个通道的梯度
+                    double red = (cLeft.getRed() + cRight.getRed() - cTop.getRed() - cBottom.getRed()
+                            + 0.5 * (cTopLeft.getRed() - cBottomRight.getRed())
+                            + 0.5 * (cTopRight.getRed() - cBottomLeft.getRed()));
+
+                    double green = (cLeft.getGreen() + cRight.getGreen() - cTop.getGreen() - cBottom.getGreen()
+                            + 0.5 * (cTopLeft.getGreen() - cBottomRight.getGreen())
+                            + 0.5 * (cTopRight.getGreen() - cBottomLeft.getGreen()));
+
+                    double blue = (cLeft.getBlue() + cRight.getBlue() - cTop.getBlue() - cBottom.getBlue()
+                            + 0.5 * (cTopLeft.getBlue() - cBottomRight.getBlue())
+                            + 0.5 * (cTopRight.getBlue() - cBottomLeft.getBlue()));
+
+
+                    // 黑边检测处理
+                    if (black) {
+                        // 综合梯度阈值检测边缘
+                        if (Math.abs(red) + Math.abs(green) + Math.abs(blue) > absBlack) {
+                            data[x][y][0] = 0;  // 标记为边缘
+                        }
+
+                        // 强边缘检测
+                        if (Math.abs(red) + Math.abs(green) + Math.abs(blue) > 2.5 * absBlack) {
+                            data[x][y][3] = 1;  // 标记为强边缘
+                        }
+                    }
+                }
+            }
+
+            // 第一次移除小黑块扫描
+            for (int y = 1; y < img.getHeight() - 1; y++) {
+                for (int x = 1; x < img.getWidth() - 1; x++) {
+                    if (data[x][y][1] == 0 && data[x][y][0] <= 0) {
+                        Queue<Integer> q = new LinkedList<>();
+                        q.add(x * 10000 + y);
+                        proRemove(x, y, data, q, 0);  // 移除小黑块
+                    }
+                }
+            }
+
+            // 第二次移除小黑块扫描
+            for (int y = 1; y < img.getHeight() - 1; y++) {
+                for (int x = 1; x < img.getWidth() - 1; x++) {
+                    if (data[x][y][1] == 0 && data[x][y][0] <= 0) {
+                        Queue<Integer> q = new LinkedList<>();
+                        q.add(x * 10000 + y);
+                        proRemove(x, y, data, q, 1);  // 移除小黑块
+                    }
+                }
+            }
+
+            // 黑色描边处理（二次描边）
+            if (black) {
+                if (blackTwice) {
+                    for (int y = 1; y < img.getHeight() - 1; y++) {
+                        for (int x = 1; x < img.getWidth() - 1; x++) {
+                            if (data[x][y][1] <= 0) {
+                                Stack<Integer> q = new Stack<>();
+                                q.add(x * 10000 + y);
+                                pro(data, q, 1);  // 执行描边处理(灰色)
+                            }
+                        }
+                    }
+                }
+
+                // 主描边处理
+                for (int y = 1; y < img.getHeight() - 1; y++) {
+                    for (int x = 1; x < img.getWidth() - 1; x++) {
+                        if (data[x][y][1] <= 0) {
+                            Stack<Integer> q = new Stack<>();
+                            q.add(x * 10000 + y);
+                            pro(data, q, 0);  // 执行描边处理(黑色)
+                        }
+                    }
+                }
+            }
+
+            // 区域着色处理
+            if (jColorful.getSelectedIndex() != 2) {
+                for (int y = 1; y < img.getHeight() - 1; y++) {
+                    for (int x = 1; x < img.getWidth() - 1; x++) {
+                        if (data[x][y][1] == 0) {
+                            Queue<Integer> q = new LinkedList<>();
+                            q.add(x * 10000 + y);
+                            Color color = new Color(data[x][y][10]);
+
+                            // 计算区域平均颜色
+                            Color color2 = pro2(data, q, color);
+
+                            // 随机着色处理
+                            if (colorful) {
+                                int total = color2.getGreen() + color2.getBlue() + color2.getRed();
+                                int min = Math.max(0, total - 255 * 2);
+                                int max = Math.min(255, 2 * total / 3);
+                                int red = (int) (min + (max - min) * Math.random());
+                                total -= red;
+                                min = Math.max(0, total - 255);
+                                max = Math.min(255, total);
+                                int green = (int) (min + (max - min) * Math.random());
+                                color2 = new Color(red, green, total - green);
+                            }
+
+                            // 着色处理（仅当区域足够大时）
+                            if (cntColor >= notProcessColorIfNumLessThan) {
+                                Queue<Integer> q1 = new LinkedList<>();
+                                q1.add(x * 10000 + y);
+                                pro3(data, q1, color2);  // 执行区域着色
+
+                                // 定期刷新显示（避免界面卡顿）
+                                if (cnt > speed * 30) {
+                                    if (!paintNotPause) update();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 最终黑边移除处理
+            if (removeBlackLast && jColorful.getSelectedIndex() != 2) {
+                for (int y = 1; y < img.getHeight() - 1; y++) {
+                    for (int x = 1; x < img.getWidth() - 1; x++) {
+                        // 恢复原始颜色
+                        if (data[x][y][9] != 0) {
+                            img.setRGB(x, y, data[x][y][9]);
+                        }
+
+                        // 处理黑边像素
+                        if (removeBlackLast && (data[x][y][1] == 1 || data[x][y][1] == 4)) {
+                            Color color;
+                            if (data[x][y][1] == 4 || !removeForNormal) {
+                                // 特殊模式：螺旋搜索最近的着色点
+                                int x1 = x, y1 = y;
+                                int w = img.getWidth(), h = img.getHeight();
+                                boolean br = false;
+
+                                // 螺旋搜索算法（最大半径50像素）
+                                for (int i = 1; i < 50; i += 2) {
+                                    // 向右搜索
+                                    for (int j = 0; j <= i; j++) {
+                                        x1++;
+                                        if (data[(w + x1) % w][(h + y1) % h][1] == 2) {
+                                            br = true;
+                                            break;
+                                        }
+                                    }
+                                    if (br) break;
+
+                                    // 向下搜索
+                                    for (int j = 0; j <= i; j++) {
+                                        y1++;
+                                        if (data[(w + x1) % w][(h + y1) % h][1] == 2) {
+                                            br = true;
+                                            break;
+                                        }
+                                    }
+                                    if (br) break;
+
+                                    // 向左搜索
+                                    for (int j = 0; j <= i + 1; j++) {
+                                        x1--;
+                                        if (data[(w + x1) % w][(h + y1) % h][1] == 2) {
+                                            br = true;
+                                            break;
+                                        }
+                                    }
+                                    if (br) break;
+
+                                    // 向上搜索
+                                    for (int j = 0; j <= i + 1; j++) {
+                                        y1--;
+                                        if (data[(w + x1) % w][(h + y1) % h][1] == 2) {
+                                            br = true;
+                                            break;
+                                        }
+                                    }
+                                    if (br) break;
+                                }
+                                color = new Color(data[(w + x1) % w][(h + y1) % h][10]);
+                            } else {
+                                // 普通模式：使用当前位置颜色
+                                color = new Color(data[x][y][10]);
+                            }
+
+                            // 设置颜色
+                            img.setRGB(x, y, color.getRGB());
+                            cnt++;
+
+                            // 定期刷新显示
+                            if (cnt > speed * 20) {
+                                if (!paintNotPause) update();
+                                cnt -= speed * 20;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 刷新显示
+            panel.repaint();
+            // 创建输出目录
+            File file = new File(System.getProperty("user.dir") + "/output/" + time);
+            if (!file.exists()) {
+                file.mkdir();
+            }
+            // 单张模式：随机文件名
+            try {
+                ImageIO.write(img, "JPEG", new FileOutputStream(
+                        System.getProperty("user.dir") + "/output/" + time + "/" + (int) (Math.random() * 10000) + ".jpg"));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+        }
+
+        /**
+         * 使用深度优先搜索(DFS)绘制黑边
+         *
+         * @param data  图像数据数组
+         * @param queue 栈，用于DFS遍历
+         * @param mode  模式：0=黑色描边, 1=灰色描边
+         */
+        void pro(int data[][][], Stack queue, int mode) {
+            while (queue.size() > 0) {
+                int a = (int) queue.pop();
+                int x = a / 10000;
+                int y = a % 10000;
+
+                // 检查当前点是否需要处理
+                if ((mode == 0 && data[x][y][0] <= 0 && data[x][y][1] <= 0) ||
+                        (mode == 1 && data[x][y][0] <= 0 && data[x][y][3] == 1)) {
+
+                    // 设置描边颜色
+                    Color color;
+                    if (mode == 0) color = new Color(0, 0, 0);       // 黑色
+                    else color = new Color(160, 160, 160);          // 灰色
+
+                    img.setRGB(x, y, color.getRGB());
+
+                    // 更新状态标志
+                    if (mode == 0) {
+                        data[x][y][1] = 1;  // 标记为黑色描边
+                        data[x][y][0] = 2;  // 标记为已处理
+                    }
+                    data[x][y][3] = 0;      // 清除强边缘标记
+
+                    // 黑色模式下添加周围浅色效果
+                    if (mode == 0) {
+                        int delta = 80, delta1 = 0, max = 40;
+
+                        // 处理4邻域点（上下左右）
+                        int[][] directions = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                        for (int[] dir : directions) {
+                            int nx = (img.getWidth() + x + dir[0]) % img.getWidth();
+                            int ny = (img.getHeight() + y + dir[1]) % img.getHeight();
+                            int cVal = new Color(img.getRGB(nx, ny)).getRed();
+                            cVal = Math.max(Math.min(max, cVal), cVal - delta);
+                            img.setRGB(nx, ny, new Color(cVal, cVal, cVal).getRGB());
+                        }
+                    }
+                    cnt++;
+                    // 定期更新界面
+                    if (cnt > speed * 10) {
+                        update();
+                    }
+
+                    // 添加邻域点到栈中（限制栈大小）
+                    if (queue.size() < 1000) {
+                        int[][] offsets = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+                        for (int[] offset : offsets) {
+                            int nx = x + offset[0];
+                            int ny = y + offset[1];
+                            if (nx >= 0 && nx < img.getWidth() && ny >= 0 && ny < img.getHeight() &&
+                                    data[nx][ny][1] <= 0) {
+                                queue.add(nx * 10000 + ny);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /**
+         * 使用BFS测定小黑块大小并决定是否移除
+         *
+         * @param x1    起始x坐标
+         * @param y1    起始y坐标
+         * @param data  图像数据
+         * @param queue 队列用于BFS
+         * @param mode  模式标志
+         */
+        void proRemove(int x1, int y1, int data[][][], Queue queue, int mode) {
+            int size = 0;
+            int maxX = 0, minX = 99999, maxY = 0, minY = 99999, l = 0;
+            while (queue.size() > 0) {
+                size++;
+                int a = (int) queue.poll();
+                int x = a / 10000;
+                int y = a % 10000;
+
+                // 更新区域边界
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                l = Math.min(maxX - minX + 8, maxY - minY + 8);
+
+                // 检查并添加邻接点
+                if ((mode == 0 && data[x][y][0] <= 0 && data[x][y][1] == 0) ||
+                        (mode == 1 && data[x][y][0] <= 0 && data[x][y][1] == 0 && data[x][y][3] == 1)) {
+                    data[x][y][1] = -1;  // 标记为待移除
+
+                    // 添加四邻域
+                    int[][] offsets = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+                    for (int[] offset : offsets) {
+                        int nx = x + offset[0];
+                        int ny = y + offset[1];
+                        if (nx >= 0 && nx < img.getWidth() && ny >= 0 && ny < img.getHeight() &&
+                                data[nx][ny][1] == 0) {
+                            queue.add(nx * 10000 + ny);
+                        }
+                    }
+                }
+            }
+
+            // 根据大小决定是否移除（满足任一条件）
+            if (size <= removeBlackPixel || l * l < size * removeBlackPixel2 / 100 + 1) {
+                Queue<Integer> q1 = new LinkedList<>();
+                q1.add(x1 * 10000 + y1);
+                proRemove2(data, q1, mode); // 执行实际移除
+            }
+        }
+
+        /**
+         * 使用BFS将标记的小黑块变白
+         *
+         * @param data  图像数据
+         * @param queue 队列用于BFS
+         * @param mode  模式标志
+         */
+        void proRemove2(int data[][][], Queue queue, int mode) {
+            while (queue.size() > 0) {
+                int a = (int) queue.poll();
+                int x = a / 10000;
+                int y = a % 10000;
+
+                // 检查并处理当前点
+                if ((mode == 0 && data[x][y][0] <= 0 && data[x][y][1] == -1) ||
+                        (mode == 1 && data[x][y][0] <= 0 && data[x][y][1] == -1 && data[x][y][3] == 1)) {
+
+                    // 重置状态
+                    data[x][y][1] = 0;
+                    if (mode == 0) {
+                        data[x][y][0] = 1; // 设为未处理
+                    } else {
+                        data[x][y][3] = 0; // 清除强边缘标记
+                    }
+
+                    // 添加邻接点
+                    int[][] offsets = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+                    for (int[] offset : offsets) {
+                        int nx = x + offset[0];
+                        int ny = y + offset[1];
+                        if (nx >= 0 && nx < img.getWidth() && ny >= 0 && ny < img.getHeight() &&
+                                data[nx][ny][1] < 0) {
+                            queue.add(nx * 10000 + ny);
+                        }
+                    }
+                }
+            }
+        }
+
+        /**
+         * 使用BFS计算区域内平均颜色
+         *
+         * @param data   图像数据
+         * @param queue  队列用于BFS
+         * @param color2 初始颜色
+         * @return 计算得到的平均颜色
+         */
+        Color pro2(int data[][][], Queue queue, Color color2) {
+            long red = 0, blue = 0, green = 0, cnt = 0;
+            while (queue.size() > 0) {
+                cnt++;
+                int a = (int) queue.poll();
+                int x = a / 10000;
+                int y = a % 10000;
+                Color color = new Color(data[x][y][10]);
+
+                // 累加RGB值
+                red += color.getRed();
+                green += color.getGreen();
+                blue += color.getBlue();
+
+                // 处理当前点并添加符合条件的邻域
+                if (data[x][y][1] == 0 && data[x][y][0] != 2) {
+                    data[x][y][1] = 4;  // 标记为待着色区域
+
+                    // 检查四邻域颜色差异
+                    int[][] offsets = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+                    for (int[] offset : offsets) {
+                        int nx = x + offset[0];
+                        int ny = y + offset[1];
+                        if (nx >= 0 && nx < img.getWidth() && ny >= 0 && ny < img.getHeight() &&
+                                data[nx][ny][1] == 0) {
+
+                            Color color1 = new Color(data[nx][ny][10]);
+                            // 颜色差异在阈值内则添加
+                            if (Math.abs(color.getRed() - color1.getRed()) +
+                                    Math.abs(color.getGreen() - color1.getGreen()) +
+                                    Math.abs(color.getBlue() - color1.getBlue()) < deltaColor) {
+                                queue.add(nx * 10000 + ny);
+                            }
+                        }
+                    }
+                }
+            }
+            cntColor = (int) cnt;
+            return new Color((int) (red / cnt), (int) (green / cnt), (int) (blue / cnt));
+        }
+
+        /**
+         * 使用BFS为区域上色
+         *
+         * @param data   图像数据
+         * @param queue  队列用于BFS
+         * @param color3 要应用的颜色
+         */
+        void pro3(int data[][][], Queue queue, Color color3) {
+            while (queue.size() > 0) {
+                int a = (int) queue.poll();
+                int x = a / 10000;
+                int y = a % 10000;
+
+                if (data[x][y][1] == 4 && data[x][y][0] != 2) {
+                    data[x][y][1] = 2;  // 标记为已着色
+                    data[x][y][9] = color3.getRGB();  // 存储新颜色
+
+                    // 应用颜色（考虑混合模式）
+                    if (new Color(img.getRGB(x, y)).getRed() == 255) {
+                        img.setRGB(x, y, color3.getRGB());
+                    } else {
+                        Color colorNow = new Color(img.getRGB(x, y));
+                        int r = Math.max(0, colorNow.getRed() + color3.getRed() - 255);
+                        int g = Math.max(0, colorNow.getGreen() + color3.getGreen() - 255);
+                        int b = Math.max(0, colorNow.getBlue() + color3.getBlue() - 255);
+                        Color color4 = new Color(r, g, b);
+
+                        // 特殊混合模式处理
+                        if (jParallaxesChooser.getSelectedIndex() == 4) {
+                            img.setRGB(x, y, color4.getRGB() & 0x00ffffff); // 保留RGB，清除Alpha
+                        } else {
+                            img.setRGB(x, y, color4.getRGB());
+                        }
+                    }
+
+                    cnt++;
+                    // 批量处理时定期更新
+                    if (cnt > speed * 4500) {
+                        if (!paintNotPause) update();
+                    }
+
+                    // 添加四邻域
+                    int[][] offsets = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+                    for (int[] offset : offsets) {
+                        int nx = x + offset[0];
+                        int ny = y + offset[1];
+                        if (nx >= 0 && nx < img.getWidth() && ny >= 0 && ny < img.getHeight() &&
+                                data[nx][ny][1] == 4) {
+                            queue.add(nx * 10000 + ny);
+                        }
+                    }
+                }
+            }
+        }
+
+        /**
+         * 计算目标颜色（考虑多种混合模式）
+         *
+         * @param colorMap           贴图颜色
+         * @param targetColor        目标颜色
+         * @param standardColor      标准颜色
+         * @param colorNow           当前颜色
+         * @param changeColorWithMap 是否使用贴图
+         * @return 最终计算的目标颜色
+         */
+        Color getTargetColor(Color colorMap, Color targetColor, Color standardColor, Color colorNow, boolean changeColorWithMap) {
+            // 基础颜色计算
+            int r = Math.max(0, colorNow.getRed() - standardColor.getRed() + targetColor.getRed());
+            int g = Math.max(0, colorNow.getGreen() - standardColor.getGreen() + targetColor.getGreen());
+            int b = Math.max(0, colorNow.getBlue() - standardColor.getBlue() + targetColor.getBlue());
+            Color color4 = new Color(Math.min(r, 255), Math.min(g, 255), Math.min(b, 255));
+
+            // 使用贴图时的混合模式
+            if (changeColorWithMap && imgMap != null) {
+                int blendMode = jParallaxesChooser.getSelectedIndex();
+                switch (blendMode) {
+                    case 0: // 直接使用贴图颜色
+                        color4 = colorMap;
+                        break;
+                    case 1: // 平均混合
+                        color4 = new Color(
+                                (colorMap.getRed() + colorNow.getRed()) / 2,
+                                (colorMap.getGreen() + colorNow.getGreen()) / 2,
+                                (colorMap.getBlue() + colorNow.getBlue()) / 2);
+                        break;
+                    case 2: // 乘法混合
+                        color4 = new Color(
+                                (int) (colorMap.getRed() * colorNow.getRed() / 255.0),
+                                (int) (colorMap.getGreen() * colorNow.getGreen() / 255.0),
+                                (int) (colorMap.getBlue() * colorNow.getBlue() / 255.0));
+                        break;
+                    case 3: // 屏幕混合
+                        color4 = new Color(
+                                255 - (int) ((255 - colorMap.getRed()) * (255 - colorNow.getRed()) / 255.0),
+                                255 - (int) ((255 - colorMap.getGreen()) * (255 - colorNow.getGreen()) / 255.0),
+                                255 - (int) ((255 - colorMap.getBlue()) * (255 - colorNow.getBlue()) / 255.0));
+                        break;
+                    case 4: // 特殊混合模式（半透明灰度）
+                        int a = 255 - colorMap.getRed();
+                        color4 = new Color(colorNow.getRed() / 2, colorNow.getGreen() / 2, colorNow.getBlue() / 2, a);
+                        break;
+                }
+            }
+            return color4;
+        }
+        /**
+         * 更新界面和控制处理速度
+         * 重置计数器并添加适当延迟
+         */
+        void update() {
+            cnt = 0; // 重置计数器
+            // 根据速度参数添加延迟
+            if (speed < 100) {
+                try {
+                    Thread.sleep(1); // 短时间延迟
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            panel.repaint(); // 刷新界面
+        }
+    }
+}
+
+
+
